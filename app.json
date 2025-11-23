@@ -1,0 +1,56 @@
+{
+  "expo": {
+    "name": "Estudiemos Cole",
+    "slug": "estudiemos-cole",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F77F00"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.estudiemos.cole",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Esta app necesita acceso a tu cámara para escanear códigos QR y compartir materias.",
+        "NSPhotoLibraryUsageDescription": "Esta app necesita acceso a tu galería para que puedas agregar imágenes a tus materias.",
+        "NSMicrophoneUsageDescription": "Esta app necesita acceso al micrófono para funciones de audio."
+      }
+    },
+    "android": {
+      "package": "com.estudiemos.cole",
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#F77F00"
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-barcode-scanner",
+        {
+          "cameraPermission": "Permite que $(PRODUCT_NAME) acceda a tu cámara para escanear códigos QR"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Permite que $(PRODUCT_NAME) acceda a tus fotos para agregar imágenes a tus materias"
+        }
+      ]
+    ]
+  }
+}
