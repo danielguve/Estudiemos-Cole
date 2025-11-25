@@ -847,7 +847,7 @@ export default function App() {
     return (
       <SafeAreaView style={styles.formContainer}>
         <StatusBar barStyle="dark-content" />
-        <ScrollView style={styles.formContent}>
+        <ScrollView contentContainerStyle={styles.formContent}>
           <Text style={styles.formTitle}>
             {authMode === 'login' ? '👋 Bienvenido' : '📝 Crear cuenta'}
           </Text>
@@ -1884,7 +1884,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FECB62',
   },
   formContent: {
-    flex: 1,
+    flexGrow: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 30,
