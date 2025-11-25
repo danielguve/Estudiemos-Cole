@@ -238,17 +238,20 @@ export default function App() {
   const crearMateriaSupabase = async (nombre: string, emoji: string) => {
     try {
       const userId = await getUserId();
-      if (!userId) throw new Error('No autenticado');
+      if (!userId) {
+        // No hay sesión: no intentar crear en Supabase, retornar null para fallback local
+        return null;
+      }
 
       const { data, error } = await db.from('materias').insert([{ user_id: userId, nombre, emoji }]).select();
       if (error) {
-        console.error('Error al crear materia en Supabase:', error);
+        console.error('Error al crear materia en Supabase:', error.message ?? error);
         return null;
       }
 
       return data?.[0] ?? null;
     } catch (err) {
-      console.error('crearMateriaSupabase error:', err);
+      console.error('crearMateriaSupabase unexpected error:', err);
       return null;
     }
   };
@@ -265,12 +268,15 @@ export default function App() {
   const agregarNotaSupabase = async (materiaId: string, contenido: string) => {
     try {
       const userId = await getUserId();
-      if (!userId) throw new Error('No autenticado');
+      if (!userId) {
+        // Sin sesión: no persistir en Supabase
+        return;
+      }
 
       const { error } = await db.from('notas').insert([{ materia_id: materiaId, user_id: userId, contenido }]);
-      if (error) console.error('Error agregando nota:', error);
+      if (error) console.error('Error agregando nota:', error.message ?? error);
     } catch (err) {
-      console.error('agregarNotaSupabase error:', err);
+      console.error('agregarNotaSupabase unexpected error:', err);
     }
   };
 
@@ -332,9 +338,9 @@ export default function App() {
 
   const handleInscribirMateria = () => {
     if (nuevaMateria.trim()) {
-      // Si está autenticado, crear en Supabase y usar el id retornado
       (async () => {
-        try {
+        const userId = await getUserId();
+        if (userId) {
           const nueva = await crearMateriaSupabase(nuevaMateria.trim(), emojiSeleccionado);
           if (nueva) {
             const nuevasMaterias = [...materias, { id: nueva.id, nombre: nueva.nombre, emoji: nueva.emoji, imagenes: nueva.imagenes || [] }];
@@ -343,15 +349,14 @@ export default function App() {
             const nuevasMaterias = [...materias, { nombre: nuevaMateria.trim(), emoji: emojiSeleccionado }];
             setMaterias(nuevasMaterias);
           }
-        } catch (err) {
-          console.error('Error creando materia:', err);
+        } else {
           const nuevasMaterias = [...materias, { nombre: nuevaMateria.trim(), emoji: emojiSeleccionado }];
           setMaterias(nuevasMaterias);
-        } finally {
-          setNuevaMateria('');
-          setEmojiSeleccionado('📚');
-          setMostrarEmojis(false);
         }
+
+        setNuevaMateria('');
+        setEmojiSeleccionado('📚');
+        setMostrarEmojis(false);
       })();
     }
   };
