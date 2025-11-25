@@ -1219,7 +1219,11 @@ export default function App() {
                   style={styles.circuloPerfil}
                   onPress={() => setActiveTab('Perfil')}
                 >
-                  <Text style={styles.inicialPerfil}>{userName.charAt(0).toUpperCase()}</Text>
+                  {profileImage ? (
+                    <Image source={{ uri: profileImage }} style={styles.imagenPerfilInicio} />
+                  ) : (
+                    <Text style={styles.inicialPerfil}>{userName.charAt(0).toUpperCase()}</Text>
+                  )}
                 </Pressable>
                 <View style={styles.rachaContainer}>
                   <View style={styles.rachaNumeroContainer}>
@@ -1429,7 +1433,11 @@ export default function App() {
               style={styles.perfilHeader}
             >
               <View style={styles.perfilCirculo}>
-                <Text style={styles.perfilInicial}>{userName.charAt(0).toUpperCase()}</Text>
+                {profileImage ? (
+                  <Image source={{ uri: profileImage }} style={styles.imagenPerfilHeader} />
+                ) : (
+                  <Text style={styles.perfilInicial}>{userName.charAt(0).toUpperCase()}</Text>
+                )}
               </View>
               <Text style={styles.perfilNombre}>{userName}</Text>
               <Text style={styles.perfilEdad}>{userAge} años</Text>
@@ -1548,35 +1556,53 @@ export default function App() {
       <View style={styles.tabBar}>
         <TouchableOpacity 
           style={styles.tab}
-          onPress={() => setActiveTab('Inicio')}
+          onPress={() => {
+            setActiveTab('Inicio');
+            setMostrarEditarPerfil(false);
+            setMateriaAbierta(null);
+          }}
         >
           <Text style={styles.tabIcon}>🏠</Text>
         </TouchableOpacity>
 
         <TouchableOpacity 
           style={styles.tab}
-          onPress={() => setActiveTab('Mis Materias')}
+          onPress={() => {
+            setActiveTab('Mis Materias');
+            setMostrarEditarPerfil(false);
+          }}
         >
           <Text style={styles.tabIcon}>📚</Text>
         </TouchableOpacity>
 
         <TouchableOpacity 
           style={styles.tab}
-          onPress={() => setActiveTab('Estudiemos')}
+          onPress={() => {
+            setActiveTab('Estudiemos');
+            setMostrarEditarPerfil(false);
+            setMateriaAbierta(null);
+          }}
         >
           <Text style={styles.tabIcon}>📖</Text>
         </TouchableOpacity>
 
         <TouchableOpacity 
           style={styles.tab}
-          onPress={() => setActiveTab('Chat IA')}
+          onPress={() => {
+            setActiveTab('Chat IA');
+            setMostrarEditarPerfil(false);
+            setMateriaAbierta(null);
+          }}
         >
           <Text style={styles.tabIcon}>💬</Text>
         </TouchableOpacity>
 
         <TouchableOpacity 
           style={styles.tab}
-          onPress={() => setActiveTab('Perfil')}
+          onPress={() => {
+            setActiveTab('Perfil');
+            setMateriaAbierta(null);
+          }}
         >
           <Text style={styles.tabIcon}>👤</Text>
         </TouchableOpacity>
@@ -1657,6 +1683,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 4,
     elevation: 4,
+    overflow: 'hidden',
   },
   inicialPerfil: {
     fontSize: 28,
@@ -2566,11 +2593,22 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 6,
     elevation: 5,
+    overflow: 'hidden',
   },
   perfilInicial: {
     fontSize: 48,
     fontWeight: 'bold',
     color: '#161616',
+  },
+  imagenPerfilHeader: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+  },
+  imagenPerfilInicio: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
   },
   perfilNombre: {
     fontSize: 26,
