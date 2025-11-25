@@ -1,16 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState } from 'react';
 import { Text, View, StyleSheet, TouchableOpacity, SafeAreaView, StatusBar, TextInput, Pressable, Alert, Image, ScrollView, Linking } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Audio } from 'expo-av';
+import LottieView from 'lottie-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import ChatIAScreen from './screens/ChatIAScreen';
-import EstudioScreen from './screens/EstudioScreen';
-import QRScannerScreen from './screens/QRScannerScreen';
-import { auth } from './lib/supabaseClient';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('Inicio');
@@ -46,187 +42,16 @@ export default function App() {
   const [nombreNuevoContenido, setNombreNuevoContenido] = useState('');
   const [editandoNombreContenido, setEditandoNombreContenido] = useState<number | null>(null);
   const [nuevoNombreContenido, setNuevoNombreContenido] = useState('');
-  const [mostrarQRScanner, setMostrarQRScanner] = useState(false);
-
-  // Estados del temporizador (persistentes entre pestañas)
-  const [tiempoEstudio, setTiempoEstudio] = useState(25);
-  const [tiempoDescanso, setTiempoDescanso] = useState(5);
-  const [segundosRestantes, setSegundosRestantes] = useState(25 * 60);
-  const [temporizadorActivo, setTemporizadorActivo] = useState(false);
-  const [esDescanso, setEsDescanso] = useState(false);
-  const [ciclosCompletados, setCiclosCompletados] = useState(0);
-
-  // Estados de música (persistentes entre pestañas)
-  const [musicaActiva, setMusicaActiva] = useState(false);
-  const [cancionActual, setCancionActual] = useState(0);
-  const soundRef = useRef<Audio.Sound | null>(null);
-
-  // Estados de autenticación Supabase
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
 
   const emojisDisponibles = ['🧪', '🕊️', '🤓', '👨🏽‍💻', '🌏', '🛠', '❤️', '🧬', '🔭', '📚', '📖', '✏️', '🎨', '🎵', '⚽'];
 
-  // Cargar datos al iniciar la app
-  useEffect(() => {
-    cargarDatos();
-  }, []);
-
-  // Guardar datos cuando cambien
-  useEffect(() => {
-    if (hasRegistered) {
-      guardarDatos();
-    }
-  }, [materias, userName, userAge, diasConsecutivos, hasRegistered]);
-
-  // Efecto para el temporizador (corre en App.tsx para que persista entre pestañas)
-  useEffect(() => {
-    let intervalo: ReturnType<typeof setInterval>;
-    
-    if (temporizadorActivo && segundosRestantes > 0) {
-      intervalo = setInterval(() => {
-        setSegundosRestantes(prev => prev - 1);
-      }, 1000);
-    } else if (temporizadorActivo && segundosRestantes === 0) {
-      // Cambiar entre estudio y descanso
-      if (esDescanso) {
-        setCiclosCompletados(prev => prev + 1);
-        setEsDescanso(false);
-        setSegundosRestantes(tiempoEstudio * 60);
-      } else {
-        setEsDescanso(true);
-        setSegundosRestantes(tiempoDescanso * 60);
-      }
-    }
-    
-    return () => clearInterval(intervalo);
-  }, [temporizadorActivo, segundosRestantes, esDescanso, tiempoEstudio, tiempoDescanso]);
-
-  const cargarDatos = async () => {
-    try {
-      const userData = await AsyncStorage.getItem('@user_data');
-      const materiasData = await AsyncStorage.getItem('@materias_data');
-      const rachaData = await AsyncStorage.getItem('@racha_data');
-      
-      if (userData) {
-        const user = JSON.parse(userData);
-        setUserName(user.nombre);
-        setUserAge(user.edad);
-        setHasRegistered(true);
-        setShowWelcome(false);
-        setShowUserForm(false);
-      }
-      
-      if (materiasData) {
-        setMaterias(JSON.parse(materiasData));
-      }
-      
-      if (rachaData) {
-        const racha = JSON.parse(rachaData);
-        const hoy = new Date().toDateString();
-        const ultimoAcceso = new Date(racha.ultimaFecha).toDateString();
-        
-        if (hoy === ultimoAcceso) {
-          setDiasConsecutivos(racha.dias);
-        } else {
-          const ayer = new Date();
-          ayer.setDate(ayer.getDate() - 1);
-          const ayerStr = ayer.toDateString();
-          
-          if (ultimoAcceso === ayerStr) {
-            setDiasConsecutivos(racha.dias + 1);
-            await AsyncStorage.setItem('@racha_data', JSON.stringify({
-              dias: racha.dias + 1,
-              ultimaFecha: new Date().toISOString()
-            }));
-          } else {
-            setDiasConsecutivos(1);
-            await AsyncStorage.setItem('@racha_data', JSON.stringify({
-              dias: 1,
-              ultimaFecha: new Date().toISOString()
-            }));
-          }
-        }
-      } else {
-        await AsyncStorage.setItem('@racha_data', JSON.stringify({
-          dias: 1,
-          ultimaFecha: new Date().toISOString()
-        }));
-      }
-    } catch (error) {
-      console.error('Error al cargar datos:', error);
-    }
-  };
-
-  const guardarDatos = async () => {
-    try {
-      await AsyncStorage.setItem('@user_data', JSON.stringify({
-        nombre: userName,
-        edad: userAge
-      }));
-      
-      await AsyncStorage.setItem('@materias_data', JSON.stringify(materias));
-      
-      await AsyncStorage.setItem('@racha_data', JSON.stringify({
-        dias: diasConsecutivos,
-        ultimaFecha: new Date().toISOString()
-      }));
-    } catch (error) {
-      console.error('Error al guardar datos:', error);
-    }
-  };
-
-  const cerrarSesion = async () => {
-    Alert.alert(
-      'Cerrar Sesión',
-      '¿Estás seguro de que quieres cerrar sesión?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Cerrar Sesión',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await AsyncStorage.clear();
-              setUserName('');
-              setUserAge('');
-              setMaterias([]);
-              setDiasConsecutivos(1);
-              setHasRegistered(false);
-              setShowWelcome(true);
-              setActiveTab('Inicio');
-            } catch (error) {
-              console.error('Error al cerrar sesión:', error);
-            }
-          }
-        }
-      ]
-    );
-  };
-
   const handleInscribirMateria = () => {
     if (nuevaMateria.trim()) {
-      const nuevasMaterias = [...materias, { nombre: nuevaMateria.trim(), emoji: emojiSeleccionado }];
-      setMaterias(nuevasMaterias);
+      setMaterias([...materias, { nombre: nuevaMateria.trim(), emoji: emojiSeleccionado }]);
       setNuevaMateria('');
       setEmojiSeleccionado('📚');
       setMostrarEmojis(false);
     }
-  };
-
-  const handleImportarMateria = (materiaImportada: typeof materias[0]) => {
-    // Verificar si la materia ya existe
-    const existe = materias.some(m => m.nombre === materiaImportada.nombre);
-    if (existe) {
-      Alert.alert('Advertencia', 'Ya tienes una materia con este nombre');
-      return;
-    }
-    
-    const nuevasMaterias = [...materias, materiaImportada];
-    setMaterias(nuevasMaterias);
-    setMostrarQRScanner(false);
   };
 
   const handleBorrarMateria = (index: number) => {
@@ -475,67 +300,10 @@ export default function App() {
     }
   };
 
-  // Funciones de autenticación Supabase
-  const handleSignUp = async () => {
-    if (!email.trim() || !password.trim() || !userName.trim() || !userAge.trim()) {
-      Alert.alert('Error', 'Completa todos los campos');
-      return;
-    }
-
-    setIsLoading(true);
-    try {
-      const { error } = await auth.signUp({
-        email: email.trim(),
-        password: password.trim(),
-      });
-
-      if (error) {
-        Alert.alert('Error en registro', error.message);
-      } else {
-        Alert.alert('Éxito', 'Cuenta creada. Por favor inicia sesión.');
-        setAuthMode('login');
-        setPassword('');
-      }
-    } catch (err) {
-      Alert.alert('Error', 'Algo salió mal al registrarse');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleLogin = async () => {
-    if (!email.trim() || !password.trim()) {
-      Alert.alert('Error', 'Completa email y contraseña');
-      return;
-    }
-
-    setIsLoading(true);
-    try {
-      const { error } = await auth.signInWithPassword({
-        email: email.trim(),
-        password: password.trim(),
-      });
-
-      if (error) {
-        Alert.alert('Error', error.message);
-      } else {
-        setShowUserForm(false);
-        setHasRegistered(true);
-        setEmail('');
-        setPassword('');
-      }
-    } catch (err) {
-      Alert.alert('Error', 'Algo salió mal al iniciar sesión');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   const handleSubmitUserInfo = () => {
-    if (authMode === 'login') {
-      handleLogin();
-    } else {
-      handleSignUp();
+    if (userName.trim() && userAge.trim()) {
+      setShowUserForm(false);
+      setHasRegistered(true); // Marcar que ya se registró
     }
   };
 
@@ -562,67 +330,33 @@ export default function App() {
     return (
       <SafeAreaView style={styles.formContainer}>
         <StatusBar barStyle="dark-content" />
-        <ScrollView style={styles.formContent}>
-          <Text style={styles.formTitle}>
-            {authMode === 'login' ? '👋 Bienvenido' : '📝 Crear cuenta'}
-          </Text>
-          <Text style={styles.formSubtitle}>
-            {authMode === 'login' ? 'Inicia sesión en tu cuenta' : 'Únete a Estudiemos'}
-          </Text>
-          
-          {authMode === 'signup' && (
-            <>
-              <TextInput
-                style={styles.input}
-                placeholder="Tu nombre"
-                value={userName}
-                onChangeText={setUserName}
-              />
-              <TextInput
-                style={styles.input}
-                placeholder="Tu edad"
-                value={userAge}
-                onChangeText={setUserAge}
-                keyboardType="numeric"
-              />
-            </>
-          )}
+        <View style={styles.formContent}>
+          <Text style={styles.formTitle}>¡Hola!</Text>
+          <Text style={styles.formSubtitle}>Cuéntanos sobre ti</Text>
           
           <TextInput
             style={styles.input}
-            placeholder="Email"
-            value={email}
-            onChangeText={setEmail}
-            keyboardType="email-address"
-            autoCapitalize="none"
+            placeholder="Tu nombre"
+            value={userName}
+            onChangeText={setUserName}
           />
           
           <TextInput
             style={styles.input}
-            placeholder="Contraseña"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
+            placeholder="Tu edad"
+            value={userAge}
+            onChangeText={setUserAge}
+            keyboardType="numeric"
           />
           
           <Pressable 
-            style={[styles.submitButton, isLoading && styles.submitButtonDisabled]} 
+            style={[styles.submitButton, (!userName.trim() || !userAge.trim()) && styles.submitButtonDisabled]} 
             onPress={handleSubmitUserInfo}
-            disabled={isLoading}
+            disabled={!userName.trim() || !userAge.trim()}
           >
-            <Text style={styles.submitButtonText}>
-              {isLoading ? 'Procesando...' : (authMode === 'login' ? 'Iniciar sesión' : 'Registrarse')}
-            </Text>
+            <Text style={styles.submitButtonText}>Continuar</Text>
           </Pressable>
-
-          <Pressable onPress={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')}>
-            <Text style={styles.toggleAuthText}>
-              {authMode === 'login' 
-                ? '¿No tienes cuenta? Regístrate' 
-                : '¿Ya tienes cuenta? Inicia sesión'}
-            </Text>
-          </Pressable>
-        </ScrollView>
+        </View>
       </SafeAreaView>
     );
   }
@@ -795,7 +529,7 @@ export default function App() {
                         ))}
                       </View>
                     )}
-                  
+
                     {/* Notas */}
                     {materia.notas && materia.notas.length > 0 && (
                       <View style={styles.seccionContenido}>
@@ -929,6 +663,13 @@ export default function App() {
               <View style={styles.saludoContainer}>
                 <Text style={styles.saludoTexto}>¡Hola, {userName}!</Text>
               </View>
+              {/* Lottie animation (place your downloaded JSON at ./assets/lottie/selected.json) */}
+              <LottieView
+                source={require('./assets/lottie/selected.json')}
+                autoPlay
+                loop
+                style={{ width: 110, height: 110, position: 'absolute', right: 20, top: 18 }}
+              />
               <View style={styles.perfilContainer}>
                 <Pressable 
                   style={styles.circuloPerfil}
@@ -997,26 +738,6 @@ export default function App() {
                       <View style={styles.cursosTexto}>
                         <Text style={styles.cursosTitle}>Estudiemos</Text>
                         <Text style={styles.cursosSubtitle}>Recursos y ejercicios</Text>
-                      </View>
-                    </View>
-                    <Text style={styles.cursosFlecha}>→</Text>
-                  </View>
-                </LinearGradient>
-              </Pressable>
-
-              <Pressable onPress={() => setMostrarQRScanner(true)}>
-                <LinearGradient
-                  colors={['#9C27B0', '#BA68C8', '#E1BEE7']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 0, y: 1 }}
-                  style={styles.estudiosBox}
-                >
-                  <View style={styles.cursosBoxContent}>
-                    <View style={styles.cursosInfo}>
-                      <Text style={styles.cursosEmoji}>📱</Text>
-                      <View style={styles.cursosTexto}>
-                        <Text style={styles.cursosTitle}>Compartir Materias</Text>
-                        <Text style={styles.cursosSubtitle}>Escanear QR o compartir</Text>
                       </View>
                     </View>
                     <Text style={styles.cursosFlecha}>→</Text>
@@ -1115,25 +836,12 @@ export default function App() {
       case 'Chat IA':
         return <ChatIAScreen materias={materias} />;
       case 'Estudiemos':
-        return <EstudioScreen 
-          tiempoEstudio={tiempoEstudio}
-          setTiempoEstudio={setTiempoEstudio}
-          tiempoDescanso={tiempoDescanso}
-          setTiempoDescanso={setTiempoDescanso}
-          segundosRestantes={segundosRestantes}
-          setSegundosRestantes={setSegundosRestantes}
-          temporizadorActivo={temporizadorActivo}
-          setTemporizadorActivo={setTemporizadorActivo}
-          esDescanso={esDescanso}
-          setEsDescanso={setEsDescanso}
-          ciclosCompletados={ciclosCompletados}
-          setCiclosCompletados={setCiclosCompletados}
-          musicaActiva={musicaActiva}
-          setMusicaActiva={setMusicaActiva}
-          cancionActual={cancionActual}
-          setCancionActual={setCancionActual}
-          soundRef={soundRef}
-        />;
+        return (
+          <View style={[styles.screen, {backgroundColor: '#FFF3E0'}]}>
+            <Text style={styles.title}>Estudiemos 📚</Text>
+            <Text style={styles.subtitle}>Herramientas de estudio</Text>
+          </View>
+        );
       case 'Perfil':
         return (
           <View style={styles.perfilScreen}>
@@ -1231,13 +939,6 @@ export default function App() {
                   </View>
                 </Pressable>
               </View>
-
-              <View style={styles.perfilSeccion}>
-                <Pressable style={styles.cerrarSesionButton} onPress={cerrarSesion}>
-                  <Text style={styles.cerrarSesionIcon}>🚪</Text>
-                  <Text style={styles.cerrarSesionTexto}>Cerrar Sesión</Text>
-                </Pressable>
-              </View>
             </View>
           </View>
         );
@@ -1254,17 +955,6 @@ export default function App() {
       <View style={styles.content}>
         {renderContent()}
       </View>
-
-      {/* Modal QR Scanner */}
-      {mostrarQRScanner && (
-        <View style={styles.modalQRContainer}>
-          <QRScannerScreen
-            materias={materias}
-            onImportar={handleImportarMateria}
-            onCerrar={() => setMostrarQRScanner(false)}
-          />
-        </View>
-      )}
 
       {/* Barra de navegación inferior */}
       <View style={styles.tabBar}>
@@ -1624,14 +1314,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     color: '#fff',
-  },
-  toggleAuthText: {
-    marginTop: 20,
-    textAlign: 'center',
-    color: '#667eea',
-    fontSize: 14,
-    fontWeight: '600',
-    textDecorationLine: 'underline',
   },
   // Estilos de Mis Materias
   inscribirContainer: {
@@ -2404,36 +2086,5 @@ const styles = StyleSheet.create({
     fontSize: 32,
     color: '#F77F00',
     fontWeight: 'bold',
-  },
-  cerrarSesionButton: {
-    backgroundColor: '#E63946',
-    borderRadius: 15,
-    padding: 18,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-    shadowColor: '#E63946',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 4,
-  },
-  cerrarSesionIcon: {
-    fontSize: 24,
-  },
-  cerrarSesionTexto: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  modalQRContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 1000,
-    backgroundColor: '#fff',
   },
 });
