@@ -8,6 +8,7 @@ import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import ChatIAScreen from './screens/ChatIAScreen';
+import CalendarioScreen from './screens/CalendarioScreen';
 import EstudioScreen from './screens/EstudioScreen';
 import QRScannerScreen from './screens/QRScannerScreen';
 import { auth, db } from './lib/supabaseClient';
@@ -1403,6 +1404,8 @@ export default function App() {
         );
       case 'Chat IA':
         return <ChatIAScreen materias={materias} />;
+      case 'Calendario':
+        return <CalendarioScreen />;
       case 'Estudiemos':
         return <EstudioScreen 
           tiempoEstudio={tiempoEstudio}
@@ -1573,6 +1576,17 @@ export default function App() {
           }}
         >
           <Text style={styles.tabIcon}>📚</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity 
+          style={styles.tab}
+          onPress={() => {
+            setActiveTab('Calendario');
+            setMostrarEditarPerfil(false);
+            setMateriaAbierta(null);
+          }}
+        >
+          <Text style={styles.tabIcon}>🗓️</Text>
         </TouchableOpacity>
 
         <TouchableOpacity 
