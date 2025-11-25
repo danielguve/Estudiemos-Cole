@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Text, View, StyleSheet, TouchableOpacity, SafeAreaView, StatusBar, TextInput, Pressable, Alert, Image, ScrollView, Linking } from 'react-native';
+import { Text, View, StyleSheet, TouchableOpacity, SafeAreaView, StatusBar, TextInput, Pressable, Alert, Image, ScrollView, Linking, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Audio } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
@@ -19,6 +19,7 @@ export default function App() {
   const [hasRegistered, setHasRegistered] = useState(false);
   const [userName, setUserName] = useState('');
   const [userAge, setUserAge] = useState('');
+  const [profileImage, setProfileImage] = useState<string | null>(null);
   const [diasConsecutivos, setDiasConsecutivos] = useState(1);
   const [materias, setMaterias] = useState<Array<{
     nombre: string, 
@@ -36,6 +37,9 @@ export default function App() {
   const [mostrarAgregarInfo, setMostrarAgregarInfo] = useState(false);
   const [mostrarContenido, setMostrarContenido] = useState(true);
   const [mostrarEditarPerfil, setMostrarEditarPerfil] = useState(false);
+  const [editarNombreValue, setEditarNombreValue] = useState('');
+  const [editarEdadValue, setEditarEdadValue] = useState('');
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [mostrarModalNota, setMostrarModalNota] = useState(false);
   const [textoNota, setTextoNota] = useState('');
   const [imagenAmpliada, setImagenAmpliada] = useState<string | null>(null);
@@ -131,6 +135,7 @@ export default function App() {
         const user = JSON.parse(userData);
         setUserName(user.nombre);
         setUserAge(user.edad);
+        setProfileImage(user.avatar || null);
         setHasRegistered(true);
         setShowWelcome(false);
         setShowUserForm(false);
@@ -181,7 +186,8 @@ export default function App() {
     try {
       await AsyncStorage.setItem('@user_data', JSON.stringify({
         nombre: userName,
-        edad: userAge
+        edad: userAge,
+        avatar: profileImage
       }));
       
       await AsyncStorage.setItem('@materias_data', JSON.stringify(materias));
@@ -253,6 +259,128 @@ export default function App() {
     } catch (err) {
       console.error('crearMateriaSupabase unexpected error:', err);
       return null;
+    }
+  };
+
+  /* ------------------ Perfil: editar nombre/edad/foto ------------------ */
+  const handleSaveProfileName = async (nuevoNombre: string) => {
+    setUserName(nuevoNombre);
+    try {
+      const userId = await getUserId();
+      if (userId) {
+        // Upsert into profiles table (if exists)
+        try {
+          await db.from('profiles').upsert({ user_id: userId, full_name: nuevoNombre }).select();
+        } catch (err) {
+          // ignore if table doesn't exist
+        }
+      }
+      await guardarDatos();
+    } catch (err) {
+      console.error('Error guardando nombre de perfil:', err);
+    }
+  };
+
+  const handleSaveProfileAge = async (nuevaEdad: string) => {
+    setUserAge(nuevaEdad);
+    try {
+      const userId = await getUserId();
+      if (userId) {
+        try {
+          await db.from('profiles').upsert({ user_id: userId, age: nuevaEdad }).select();
+        } catch (err) {
+          // ignore
+        }
+      }
+      await guardarDatos();
+    } catch (err) {
+      console.error('Error guardando edad de perfil:', err);
+    }
+  };
+
+  const handleChangeProfilePhoto = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permiso necesario', 'Necesitamos permiso para acceder a tu galería de fotos');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.7,
+      });
+
+      if (result.canceled) return;
+      const asset = result.assets[0];
+      const uri = asset.uri;
+
+      // Guardar imagen localmente PRIMERO (inmediato)
+      setProfileImage(uri);
+      await AsyncStorage.setItem('@user_data', JSON.stringify({
+        nombre: userName,
+        edad: userAge,
+        avatar: uri,
+      }));
+
+      const userId = await getUserId();
+      if (!userId) {
+        Alert.alert('✅ Guardado', 'Foto guardada localmente');
+        return;
+      }
+
+      // Subir a Supabase en segundo plano (no bloquea)
+      setIsUploadingAvatar(true);
+      uploadToSupabaseBackground(uri, userId);
+
+    } catch (err) {
+      console.error('Error al cambiar foto de perfil:', err);
+    }
+  };
+
+  const uploadToSupabaseBackground = async (uri: string, userId: string) => {
+    try {
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      const filename = `avatar_${Date.now()}.jpg`;
+      const path = `${userId}/${filename}`;
+
+      const { error: uploadError } = await db.storage.from('avatars').upload(path, blob, { 
+        contentType: 'image/jpeg',
+        upsert: true 
+      });
+
+      if (uploadError) {
+        console.error('Error subiendo avatar:', uploadError);
+        setIsUploadingAvatar(false);
+        return;
+      }
+
+      const { data: publicData } = db.storage.from('avatars').getPublicUrl(path);
+      const publicUrl = publicData.publicUrl;
+
+      // Guardar en profiles
+      await db.from('profiles').upsert({ 
+        user_id: userId, 
+        avatar_url: publicUrl,
+        full_name: userName,
+        age: userAge
+      }).select();
+
+      // Actualizar con URL pública
+      setProfileImage(publicUrl);
+      await AsyncStorage.setItem('@user_data', JSON.stringify({
+        nombre: userName,
+        edad: userAge,
+        avatar: publicUrl,
+      }));
+
+      setIsUploadingAvatar(false);
+    } catch (err) {
+      console.error('Error en uploadToSupabaseBackground:', err);
+      setIsUploadingAvatar(false);
     }
   };
 
@@ -1311,7 +1439,13 @@ export default function App() {
               <View style={styles.perfilSeccion}>
                 <Pressable 
                   style={styles.perfilSeccionHeader}
-                  onPress={() => setMostrarEditarPerfil(!mostrarEditarPerfil)}
+                  onPress={() => {
+                    setMostrarEditarPerfil(!mostrarEditarPerfil);
+                    if (!mostrarEditarPerfil) {
+                      setEditarNombreValue(userName);
+                      setEditarEdadValue(userAge);
+                    }
+                  }}
                 >
                   <Text style={styles.perfilSeccionTitulo}>Editar Perfil</Text>
                   <Text style={styles.expandIconDetalle}>{mostrarEditarPerfil ? '▼' : '▶'}</Text>
@@ -1319,59 +1453,46 @@ export default function App() {
                 
                 {mostrarEditarPerfil && (
                   <>
-                    <Pressable style={styles.perfilOpcion}>
-                      <LinearGradient
-                        colors={['#E8F5E9', '#F0F8F0']}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 0 }}
-                        style={styles.perfilOpcionGradient}
-                      >
-                        <View style={styles.perfilOpcionContent}>
-                          <Text style={styles.perfilOpcionIcon}>👤</Text>
-                          <View style={styles.perfilOpcionTexto}>
-                            <Text style={styles.perfilOpcionTitulo}>Cambiar nombre</Text>
-                            <Text style={styles.perfilOpcionSubtitulo}>Actualiza tu nombre</Text>
-                          </View>
-                        </View>
-                        <Text style={styles.perfilOpcionFlecha}>›</Text>
-                      </LinearGradient>
-                    </Pressable>
+                    <View style={styles.editRow}>
+                      <Text style={styles.editLabel}>Nombre</Text>
+                      <TextInput
+                        style={styles.editInput}
+                        value={editarNombreValue}
+                        onChangeText={setEditarNombreValue}
+                        placeholder="Tu nombre"
+                      />
+                      <Pressable style={styles.editSaveButton} onPress={() => handleSaveProfileName(editarNombreValue)}>
+                        <Text style={styles.editSaveButtonText}>Guardar</Text>
+                      </Pressable>
+                    </View>
 
-                    <Pressable style={styles.perfilOpcion}>
-                      <LinearGradient
-                        colors={['#E8F5E9', '#F0F8F0']}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 0 }}
-                        style={styles.perfilOpcionGradient}
-                      >
-                        <View style={styles.perfilOpcionContent}>
-                          <Text style={styles.perfilOpcionIcon}>🎂</Text>
-                          <View style={styles.perfilOpcionTexto}>
-                            <Text style={styles.perfilOpcionTitulo}>Cambiar edad</Text>
-                            <Text style={styles.perfilOpcionSubtitulo}>Actualiza tu edad</Text>
-                          </View>
-                        </View>
-                        <Text style={styles.perfilOpcionFlecha}>›</Text>
-                      </LinearGradient>
-                    </Pressable>
+                    <View style={styles.editRow}>
+                      <Text style={styles.editLabel}>Edad</Text>
+                      <TextInput
+                        style={styles.editInput}
+                        value={editarEdadValue}
+                        onChangeText={setEditarEdadValue}
+                        placeholder="Tu edad"
+                        keyboardType="numeric"
+                      />
+                      <Pressable style={styles.editSaveButton} onPress={() => handleSaveProfileAge(editarEdadValue)}>
+                        <Text style={styles.editSaveButtonText}>Guardar</Text>
+                      </Pressable>
+                    </View>
 
-                    <Pressable style={styles.perfilOpcion}>
-                      <LinearGradient
-                        colors={['#E8F5E9', '#F0F8F0']}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 0 }}
-                        style={styles.perfilOpcionGradient}
-                      >
-                        <View style={styles.perfilOpcionContent}>
-                          <Text style={styles.perfilOpcionIcon}>📷</Text>
-                          <View style={styles.perfilOpcionTexto}>
-                            <Text style={styles.perfilOpcionTitulo}>Cambiar foto de perfil</Text>
-                            <Text style={styles.perfilOpcionSubtitulo}>Próximamente</Text>
-                          </View>
-                        </View>
-                        <Text style={styles.perfilOpcionFlecha}>›</Text>
-                      </LinearGradient>
-                    </Pressable>
+                    <View style={styles.editRow}>
+                      <Text style={styles.editLabel}>Foto de perfil</Text>
+                      <View style={{flexDirection: 'row', alignItems: 'center', gap: 10}}>
+                        {profileImage ? (
+                          <Image source={{ uri: profileImage }} style={styles.perfilAvatarImage} />
+                        ) : (
+                          <View style={styles.perfilAvatarPlaceholder}><Text style={styles.perfilInicialSmall}>{userName.charAt(0).toUpperCase()}</Text></View>
+                        )}
+                        <Pressable style={styles.editSaveButton} onPress={handleChangeProfilePhoto}>
+                          {isUploadingAvatar ? <ActivityIndicator color="#fff" /> : <Text style={styles.editSaveButtonText}>Cambiar foto</Text>}
+                        </Pressable>
+                      </View>
+                    </View>
                   </>
                 )}
               </View>
@@ -2583,6 +2704,58 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     color: '#fff',
+  },
+  /* Perfil edit styles */
+  editRow: {
+    width: '90%',
+    backgroundColor: '#FFF',
+    padding: 12,
+    borderRadius: 12,
+    marginTop: 12,
+    alignSelf: 'center',
+  },
+  editLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  editInput: {
+    backgroundColor: '#FEF9F3',
+    borderRadius: 8,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#F0E8DC',
+    marginBottom: 8,
+  },
+  editSaveButton: {
+    backgroundColor: '#4c51bf',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  editSaveButtonText: {
+    color: '#fff',
+    fontWeight: '700',
+  },
+  perfilAvatarImage: {
+    width: 56,
+    height: 56,
+    borderRadius: 12,
+  },
+  perfilAvatarPlaceholder: {
+    width: 56,
+    height: 56,
+    borderRadius: 12,
+    backgroundColor: '#FECB62',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  perfilInicialSmall: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#161616',
   },
   modalQRContainer: {
     position: 'absolute',

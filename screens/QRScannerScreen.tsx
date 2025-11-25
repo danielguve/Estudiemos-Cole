@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   Alert,
   ScrollView,
   TextInput,
+  Platform,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -35,49 +36,40 @@ export default function QRScannerScreen({
   const [modo, setModo] = useState<'scanner' | 'compartir'>('scanner');
   const [materiaSeleccionada, setMateriaSeleccionada] = useState<string>('');
   const [codigoIngresado, setCodigoIngresado] = useState('');
+  const [parsedMateria, setParsedMateria] = useState<Materia | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string>('');
+  const [successMsg, setSuccessMsg] = useState<string>('');
 
   const handleImportarManual = () => {
-    if (!codigoIngresado.trim()) {
-      Alert.alert('⚠️ Aviso', 'Ingresa un código primero');
+    setErrorMsg('');
+    setSuccessMsg('');
+    if (!parsedMateria) {
+      setErrorMsg('No se detectó una materia válida. Pega el código y espera la validación.');
       return;
     }
 
-    try {
-      const materiaImportada = JSON.parse(codigoIngresado);
-      
-      // Validar que tenga la estructura correcta
-      if (
-        materiaImportada.nombre &&
-        materiaImportada.emoji
-      ) {
-        // Verificar si ya existe
-        const existe = materias.some(m => m.nombre === materiaImportada.nombre);
-        if (existe) {
-          Alert.alert(
-            '⚠️ Materia Duplicada',
-            `Ya tienes una materia llamada "${materiaImportada.nombre}". ¿Quieres reemplazarla?`,
-            [
-              { text: 'Cancelar', style: 'cancel' },
-              {
-                text: 'Reemplazar',
-                onPress: () => {
-                  onImportar(materiaImportada);
-                  Alert.alert('✅ Éxito', 'Materia importada correctamente');
-                  onCerrar();
-                },
-              },
-            ]
-          );
-        } else {
-          onImportar(materiaImportada);
-          Alert.alert('✅ Éxito', 'Materia importada correctamente');
-          onCerrar();
-        }
-      } else {
-        Alert.alert('❌ Error', 'El código no contiene una materia válida');
-      }
-    } catch (error) {
-      Alert.alert('❌ Error', 'Código inválido. Asegúrate de copiar el código completo.');
+    const materiaImportada = parsedMateria;
+    const existe = materias.some(m => m.nombre === materiaImportada.nombre);
+    if (existe) {
+      Alert.alert(
+        '⚠️ Materia Duplicada',
+        `Ya tienes una materia llamada "${materiaImportada.nombre}". ¿Quieres reemplazarla?`,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Reemplazar',
+            onPress: () => {
+              onImportar(materiaImportada);
+              setSuccessMsg('Materia importada (reemplazada) correctamente');
+              onCerrar();
+            },
+          },
+        ]
+      );
+    } else {
+      onImportar(materiaImportada);
+      setSuccessMsg('Materia importada correctamente');
+      onCerrar();
     }
   };
 
@@ -85,9 +77,9 @@ export default function QRScannerScreen({
     const texto = await Clipboard.getStringAsync();
     if (texto) {
       setCodigoIngresado(texto);
-      Alert.alert('✅ Pegado', 'Código pegado desde el portapapeles');
+      setSuccessMsg('Código pegado desde el portapapeles');
     } else {
-      Alert.alert('⚠️ Aviso', 'El portapapeles está vacío');
+      setErrorMsg('El portapapeles está vacío');
     }
   };
 
@@ -153,13 +145,13 @@ export default function QRScannerScreen({
 
   const copiarAlPortapapeles = async () => {
     if (!materiaSeleccionada) {
-      Alert.alert('⚠️ Aviso', 'Selecciona una materia primero');
+      setErrorMsg('Selecciona una materia primero');
       return;
     }
 
     const qrData = generarQRData(materiaSeleccionada);
     await Clipboard.setStringAsync(qrData);
-    Alert.alert('✅ Copiado', 'Código copiado al portapapeles');
+    setSuccessMsg('Código copiado al portapapeles');
   };
 
   return (
@@ -220,42 +212,69 @@ export default function QRScannerScreen({
       {modo === 'scanner' ? (
         <View style={styles.contenidoScanner}>
           <View style={styles.inputContainer}>
-            <Text style={styles.labelInput}>
-              Pega aquí el código de la materia:
-            </Text>
+            <Text style={styles.labelInput}>Pega aquí el código de la materia</Text>
             <TextInput
               style={styles.textInput}
               multiline
               numberOfLines={6}
               value={codigoIngresado}
-              onChangeText={setCodigoIngresado}
-              placeholder='{"id":"...","nombre":"...","color":"...","notas":"..."}'
+              onChangeText={text => setCodigoIngresado(text)}
+              placeholder='Ej: {"nombre":"Matemáticas","emoji":"📐","notas":[]} '
               placeholderTextColor="#999"
             />
+
             <View style={styles.botonesInput}>
-              <TouchableOpacity
-                style={styles.botonPegar}
-                onPress={pegarDesdePortapapeles}
-              >
+              <TouchableOpacity style={styles.botonPegar} onPress={pegarDesdePortapapeles}>
                 <Text style={styles.textoBotonPegar}>📋 Pegar</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.botonImportar}
-                onPress={handleImportarManual}
-              >
-                <Text style={styles.textoBotonImportar}>✓ Importar</Text>
+              <TouchableOpacity style={styles.botonValidar} onPress={() => {
+                setErrorMsg(''); setSuccessMsg('');
+                try {
+                  const parsed = codigoIngresado ? JSON.parse(codigoIngresado) : null;
+                  if (parsed && parsed.nombre && parsed.emoji) {
+                    setParsedMateria(parsed);
+                    setSuccessMsg('Código válido. Vista previa lista.');
+                  } else {
+                    setParsedMateria(null);
+                    setErrorMsg('El JSON no parece una materia válida (falta nombre o emoji).');
+                  }
+                } catch (e) {
+                  setParsedMateria(null);
+                  setErrorMsg('JSON inválido. Revisa el formato.');
+                }
+              }}>
+                <Text style={styles.textoBotonValidar}>🔎 Previsualizar</Text>
               </TouchableOpacity>
             </View>
+
+            {errorMsg ? <Text style={styles.errorText}>{errorMsg}</Text> : null}
+            {successMsg ? <Text style={styles.successText}>{successMsg}</Text> : null}
+
+            {parsedMateria && (
+              <View style={styles.previewCardCompact}>
+                <View style={styles.previewLeft}>
+                  <Text style={styles.previewEmojiCompact}>{parsedMateria.emoji}</Text>
+                </View>
+                <View style={styles.previewMiddle}>
+                  <Text style={styles.previewNameCompact}>{parsedMateria.nombre}</Text>
+                  <Text style={styles.previewMetaCompact}>{(parsedMateria.notas || []).length} notas · {(parsedMateria.imagenes || []).length} imágenes</Text>
+                </View>
+                <View style={styles.previewRight}>
+                  <TouchableOpacity style={styles.smallButton} onPress={handleImportarManual}>
+                    <Text style={styles.smallButtonText}>Importar</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            <Text style={styles.instrucciones}>
+              Pide a tu amigo que comparta el código JSON y pégalo aquí. También puedes pegar desde el portapapeles.
+            </Text>
           </View>
-          <Text style={styles.instrucciones}>
-            Pide a tu amigo que comparta el código de su materia y pégalo aquí
-          </Text>
         </View>
       ) : (
         <ScrollView style={styles.contenidoCompartir}>
-          <Text style={styles.subtitulo}>
-            Selecciona una materia para generar su código QR:
-          </Text>
+          <Text style={styles.subtitulo}>Selecciona una materia para generar su código</Text>
           {materias.map((materia, index) => (
             <TouchableOpacity
               key={index}
@@ -265,34 +284,21 @@ export default function QRScannerScreen({
               ]}
               onPress={() => setMateriaSeleccionada(index.toString())}
             >
-              <Text style={styles.emojiMateria}>{materia.emoji}</Text>
+              <View style={styles.avatar}>{materia.emoji}</View>
               <Text style={styles.nombreMateria}>{materia.nombre}</Text>
-              {materiaSeleccionada === index.toString() && (
-                <Text style={styles.checkMark}>✓</Text>
-              )}
+              {materiaSeleccionada === index.toString() && <Text style={styles.checkMark}>✓</Text>}
             </TouchableOpacity>
           ))}
 
           {materiaSeleccionada && (
             <View style={styles.seccionQR}>
-              <Text style={styles.tituloQR}>Código QR:</Text>
-              <View style={styles.qrPlaceholder}>
-                <Text style={styles.qrTexto}>📱</Text>
-                <Text style={styles.qrSubtexto}>
-                  {materias[parseInt(materiaSeleccionada)]?.nombre}
-                </Text>
-                <Text style={styles.qrInfo}>
-                  Nota: Los archivos adjuntos no se comparten por seguridad.
-                  Solo se compartirán las notas.
-                </Text>
-              </View>
-              <TouchableOpacity
-                style={styles.botonCopiar}
-                onPress={copiarAlPortapapeles}
-              >
-                <Text style={styles.textoBotonCopiar}>
-                  📋 Copiar código al portapapeles
-                </Text>
+              <Text style={styles.tituloQR}>Código JSON generado</Text>
+              <ScrollView style={styles.codeBox}>
+                <Text style={styles.codeText}>{generarQRData(materiaSeleccionada)}</Text>
+              </ScrollView>
+              <Text style={styles.qrInfo}>Nota: No se comparten archivos ni URIs locales por seguridad.</Text>
+              <TouchableOpacity style={styles.botonCopiar} onPress={copiarAlPortapapeles}>
+                <Text style={styles.textoBotonCopiar}>📋 Copiar código</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -374,18 +380,7 @@ const styles = StyleSheet.create({
     color: '#333',
     marginBottom: 10,
   },
-  textInput: {
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    padding: 15,
-    fontSize: 14,
-    color: '#333',
-    minHeight: 120,
-    textAlignVertical: 'top',
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    fontFamily: 'monospace',
-  },
+  /* textInput moved/updated later to be less dominant */
   botonesInput: {
     flexDirection: 'row',
     gap: 10,
@@ -538,5 +533,166 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  botonValidar: {
+    flex: 1,
+    backgroundColor: '#4c51bf',
+    padding: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+    marginLeft: 10,
+  },
+  textoBotonValidar: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  errorText: {
+    color: '#b00020',
+    marginTop: 10,
+    fontSize: 14,
+  },
+  successText: {
+    color: '#1e7e34',
+    marginTop: 10,
+    fontSize: 14,
+  },
+  previewCard: {
+    marginTop: 15,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 15,
+    borderWidth: 1,
+    borderColor: '#e6e9ff',
+  },
+  previewEmoji: {
+    fontSize: 36,
+    marginBottom: 6,
+  },
+  previewName: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#222',
+  },
+  previewMeta: {
+    fontSize: 13,
+    color: '#666',
+    marginTop: 6,
+  },
+  previewActions: {
+    flexDirection: 'row',
+    marginTop: 12,
+  },
+  previewButton: {
+    flex: 1,
+    backgroundColor: '#667eea',
+    padding: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  previewButtonText: {
+    color: '#fff',
+    fontWeight: '700',
+  },
+  previewButtonOutline: {
+    flex: 1,
+    backgroundColor: 'transparent',
+    padding: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginLeft: 10,
+    borderWidth: 1,
+    borderColor: '#667eea',
+  },
+  previewButtonOutlineText: {
+    color: '#667eea',
+    fontWeight: '700',
+  },
+  avatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: '#eef2ff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  codeBox: {
+    backgroundColor: '#0f1724',
+    padding: 12,
+    borderRadius: 10,
+    marginTop: 12,
+    maxHeight: 220,
+  },
+  codeText: {
+    color: '#e6eef8',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    fontSize: 12,
+  },
+  /* Compact preview styles */
+  previewCardCompact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(102,126,234,0.06)',
+    borderRadius: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    marginTop: 12,
+  },
+  previewLeft: {
+    width: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  previewEmojiCompact: {
+    fontSize: 28,
+    backgroundColor: '#fff',
+    width: 44,
+    height: 44,
+    textAlign: 'center',
+    lineHeight: 44,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  previewMiddle: {
+    flex: 1,
+  },
+  previewNameCompact: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1f2937',
+  },
+  previewMetaCompact: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginTop: 2,
+  },
+  previewRight: {
+    marginLeft: 8,
+  },
+  smallButton: {
+    backgroundColor: '#4c51bf',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+  },
+  smallButtonText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  /* Input de código menos dominante */
+  textInput: {
+    backgroundColor: 'transparent',
+    borderRadius: 10,
+    padding: 12,
+    fontSize: 14,
+    color: '#333',
+    minHeight: 80,
+    textAlignVertical: 'top',
+    borderWidth: 1,
+    borderColor: '#e6e9ff',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
 });
