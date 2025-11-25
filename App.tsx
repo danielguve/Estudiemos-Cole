@@ -285,6 +285,10 @@ export default function App() {
           style: 'destructive',
           onPress: async () => {
             try {
+              // Sign out from Supabase
+              await auth.signOut();
+
+              // Clear local data
               await AsyncStorage.clear();
               setUserName('');
               setUserAge('');
@@ -301,6 +305,30 @@ export default function App() {
       ]
     );
   };
+
+  // Escuchar cambios de sesión (login/logout) y sincronizar
+  useEffect(() => {
+    const { data } = auth.onAuthStateChange((event, session) => {
+      if (session?.user) {
+        setHasRegistered(true);
+        setShowWelcome(false);
+        // cargar materias del usuario
+        cargarMateriasSupabase();
+      } else {
+        setHasRegistered(false);
+        setShowWelcome(true);
+        setMaterias([]);
+      }
+    });
+
+    return () => {
+      try {
+        data?.subscription?.unsubscribe();
+      } catch (e) {
+        // ignore
+      }
+    };
+  }, []);
 
   const handleInscribirMateria = () => {
     if (nuevaMateria.trim()) {
