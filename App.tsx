@@ -10,7 +10,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import ChatIAScreen from './screens/ChatIAScreen';
 import EstudioScreen from './screens/EstudioScreen';
 import QRScannerScreen from './screens/QRScannerScreen';
-import { auth } from './lib/supabaseClient';
+import { auth, db } from './lib/supabaseClient';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('Inicio');
@@ -72,6 +72,23 @@ export default function App() {
   // Cargar datos al iniciar la app
   useEffect(() => {
     cargarDatos();
+  }, []);
+
+  // Si ya hay sesión activa en Supabase, cargar materias desde DB
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data } = await auth.getUser();
+        // @ts-ignore
+        if (data?.user) {
+          setShowWelcome(false);
+          setHasRegistered(true);
+          await cargarMateriasSupabase();
+        }
+      } catch (err) {
+        // no-op
+      }
+    })();
   }, []);
 
   // Guardar datos cuando cambien
@@ -178,6 +195,85 @@ export default function App() {
     }
   };
 
+  /* ------------------ Supabase CRUD para Materias/Notas ------------------ */
+  const getUserId = async (): Promise<string | null> => {
+    try {
+      const { data } = await auth.getUser();
+      // v2: data.user
+      // @ts-ignore
+      return data?.user?.id ?? null;
+    } catch (err) {
+      console.error('Error obteniendo usuario:', err);
+      return null;
+    }
+  };
+
+  const cargarMateriasSupabase = async () => {
+    try {
+      const userId = await getUserId();
+      if (!userId) return;
+
+      const { data, error } = await db.from('materias').select('id, nombre, emoji, imagenes, created_at').eq('user_id', userId).order('created_at', { ascending: true });
+      if (error) {
+        console.error('Error al cargar materias desde Supabase:', error);
+        return;
+      }
+
+      if (data) {
+        // Mapear a la estructura local
+        const materiasDesdeDB = data.map((m: any) => ({
+          id: m.id,
+          nombre: m.nombre,
+          emoji: m.emoji,
+          imagenes: m.imagenes || [],
+          created_at: m.created_at,
+        }));
+        setMaterias(materiasDesdeDB as any);
+      }
+    } catch (err) {
+      console.error('Error en cargarMateriasSupabase:', err);
+    }
+  };
+
+  const crearMateriaSupabase = async (nombre: string, emoji: string) => {
+    try {
+      const userId = await getUserId();
+      if (!userId) throw new Error('No autenticado');
+
+      const { data, error } = await db.from('materias').insert([{ user_id: userId, nombre, emoji }]).select();
+      if (error) {
+        console.error('Error al crear materia en Supabase:', error);
+        return null;
+      }
+
+      return data?.[0] ?? null;
+    } catch (err) {
+      console.error('crearMateriaSupabase error:', err);
+      return null;
+    }
+  };
+
+  const borrarMateriaSupabase = async (materiaId: string) => {
+    try {
+      const { error } = await db.from('materias').delete().eq('id', materiaId);
+      if (error) console.error('Error borrar materia:', error);
+    } catch (err) {
+      console.error('borrarMateriaSupabase error:', err);
+    }
+  };
+
+  const agregarNotaSupabase = async (materiaId: string, contenido: string) => {
+    try {
+      const userId = await getUserId();
+      if (!userId) throw new Error('No autenticado');
+
+      const { error } = await db.from('notas').insert([{ materia_id: materiaId, user_id: userId, contenido }]);
+      if (error) console.error('Error agregando nota:', error);
+    } catch (err) {
+      console.error('agregarNotaSupabase error:', err);
+    }
+  };
+
   const cerrarSesion = async () => {
     Alert.alert(
       'Cerrar Sesión',
@@ -208,11 +304,27 @@ export default function App() {
 
   const handleInscribirMateria = () => {
     if (nuevaMateria.trim()) {
-      const nuevasMaterias = [...materias, { nombre: nuevaMateria.trim(), emoji: emojiSeleccionado }];
-      setMaterias(nuevasMaterias);
-      setNuevaMateria('');
-      setEmojiSeleccionado('📚');
-      setMostrarEmojis(false);
+      // Si está autenticado, crear en Supabase y usar el id retornado
+      (async () => {
+        try {
+          const nueva = await crearMateriaSupabase(nuevaMateria.trim(), emojiSeleccionado);
+          if (nueva) {
+            const nuevasMaterias = [...materias, { id: nueva.id, nombre: nueva.nombre, emoji: nueva.emoji, imagenes: nueva.imagenes || [] }];
+            setMaterias(nuevasMaterias as any);
+          } else {
+            const nuevasMaterias = [...materias, { nombre: nuevaMateria.trim(), emoji: emojiSeleccionado }];
+            setMaterias(nuevasMaterias);
+          }
+        } catch (err) {
+          console.error('Error creando materia:', err);
+          const nuevasMaterias = [...materias, { nombre: nuevaMateria.trim(), emoji: emojiSeleccionado }];
+          setMaterias(nuevasMaterias);
+        } finally {
+          setNuevaMateria('');
+          setEmojiSeleccionado('📚');
+          setMostrarEmojis(false);
+        }
+      })();
     }
   };
 
@@ -242,6 +354,10 @@ export default function App() {
           text: 'Borrar',
           style: 'destructive',
           onPress: () => {
+            const materia = materias[index] as any;
+            if (materia && materia.id) {
+              borrarMateriaSupabase(materia.id);
+            }
             const nuevasMaterias = materias.filter((_, i) => i !== index);
             setMaterias(nuevasMaterias);
             setMateriaExpandida(null);
@@ -406,7 +522,13 @@ export default function App() {
 
   const handleAgregarNota = () => {
     if (materiaAbierta === null || !textoNota.trim()) return;
-    
+
+    const materia = materias[materiaAbierta] as any;
+    // Si la materia viene de la DB (tiene id), subir la nota a Supabase
+    if (materia && materia.id) {
+      agregarNotaSupabase(materia.id, textoNota.trim());
+    }
+
     const materiasActualizadas = [...materias];
     const notasExistentes = materiasActualizadas[materiaAbierta].notas || [];
     materiasActualizadas[materiaAbierta].notas = [...notasExistentes, textoNota.trim()];
@@ -523,6 +645,8 @@ export default function App() {
         setHasRegistered(true);
         setEmail('');
         setPassword('');
+        // Cargar materias desde Supabase al iniciar sesión
+        cargarMateriasSupabase();
       }
     } catch (err) {
       Alert.alert('Error', 'Algo salió mal al iniciar sesión');
