@@ -4,12 +4,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Calendar, DateObject } from 'react-native-calendars';
 import * as Notifications from 'expo-notifications';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { auth, db } from '../lib/supabaseClient';
 
 type Task = {
   id: string;
   title: string;
   description?: string;
   dueAt: string; // ISO
+  completed?: boolean;
 };
 
 type TasksByDay = Record<string, Task[]>; // key: YYYY-MM-DD
@@ -19,6 +21,8 @@ Notifications.setNotificationHandler({
     shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
+    shouldShowBanner: true,
+    shouldShowList: true,
   }),
 });
 
@@ -52,6 +56,8 @@ export default function CalendarioScreen() {
           importance: Notifications.AndroidImportance.DEFAULT,
         });
       }
+      // Load tasks from Supabase
+      await loadTasksFromSupabase();
     })();
   }, []);
 
@@ -85,17 +91,88 @@ export default function CalendarioScreen() {
     } catch {}
   };
 
+  const getUserId = async (): Promise<string | null> => {
+    try {
+      const { data } = await auth.getUser();
+      // @ts-ignore
+      return data?.user?.id ?? null;
+    } catch (err) {
+      return null;
+    }
+  };
+
+  const loadTasksFromSupabase = async () => {
+    try {
+      const userId = await getUserId();
+      if (!userId) return;
+      const { data, error } = await db.from('tareas').select('id, title, description, due_at, completed').eq('user_id', userId).order('due_at', { ascending: true });
+      if (error) {
+        console.error('Error loading tasks from Supabase:', error);
+        return;
+      }
+      if (data) {
+        const byDay: TasksByDay = {};
+        data.forEach((row: any) => {
+          const t: Task = { id: String(row.id), title: row.title, description: row.description, dueAt: row.due_at, completed: row.completed ?? false };
+          const dayKey = t.dueAt.slice(0, 10);
+          if (!byDay[dayKey]) byDay[dayKey] = [];
+          byDay[dayKey].push(t);
+        });
+        setTasksByDay(byDay);
+        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(byDay));
+      }
+    } catch (err) {
+      console.error('loadTasksFromSupabase error:', err);
+    }
+  };
+
+  const createTaskSupabase = async (t: Task) => {
+    try {
+      const userId = await getUserId();
+      if (!userId) return;
+      const { error } = await db.from('tareas').insert([{ user_id: userId, title: t.title, description: t.description, due_at: t.dueAt, completed: false }]);
+      if (error) console.error('Error creating task in Supabase:', error);
+    } catch (err) {
+      console.error('createTaskSupabase error:', err);
+    }
+  };
+
+  const deleteTaskSupabase = async (taskId: string) => {
+    try {
+      const userId = await getUserId();
+      if (!userId) return;
+      const { error } = await db.from('tareas').delete().eq('id', taskId).eq('user_id', userId);
+      if (error) console.error('Error deleting task:', error);
+    } catch (err) {
+      console.error('deleteTaskSupabase error:', err);
+    }
+  };
+
+  const updateTaskCompletedSupabase = async (taskId: string, completed: boolean) => {
+    try {
+      const userId = await getUserId();
+      if (!userId) return;
+      const { error } = await db.from('tareas').update({ completed }).eq('id', taskId).eq('user_id', userId);
+      if (error) console.error('Error updating task completed:', error);
+    } catch (err) {
+      console.error('updateTaskCompletedSupabase error:', err);
+    }
+  };
+
   const scheduleTaskNotification = async (t: Task) => {
     try {
       const triggerDate = new Date(t.dueAt);
-      if (triggerDate.getTime() <= Date.now()) return; // no programar en el pasado
+      const now = Date.now();
+      const triggerTime = triggerDate.getTime();
+      if (triggerTime <= now) return; // no programar en el pasado
+      const secondsFromNow = Math.floor((triggerTime - now) / 1000);
       await Notifications.scheduleNotificationAsync({
         content: {
           title: 'Tarea próxima a vencer',
           body: `${t.title} vence el ${triggerDate.toLocaleString()}`,
           sound: true,
         },
-        trigger: triggerDate,
+        trigger: { seconds: secondsFromNow } as any,
       });
     } catch (e) {
       // ignore
@@ -109,10 +186,11 @@ export default function CalendarioScreen() {
     }
     const id = `${Date.now()}`;
     const dueAtIso = dueDate.toISOString();
-    const t: Task = { id, title: title.trim(), description: description.trim() || undefined, dueAt: dueAtIso };
+    const t: Task = { id, title: title.trim(), description: description.trim() || undefined, dueAt: dueAtIso, completed: false };
     const dayKey = dueAtIso.slice(0, 10);
     const next: TasksByDay = { ...tasksByDay, [dayKey]: [...(tasksByDay[dayKey] || []), t] };
     await saveTasks(next);
+    await createTaskSupabase(t);
     await scheduleTaskNotification(t);
     setShowAddModal(false);
     setTitle('');
@@ -135,6 +213,16 @@ export default function CalendarioScreen() {
     const nextDayTasks = dayTasks.filter((t) => t.id !== taskId);
     const next: TasksByDay = { ...tasksByDay, [dayKey]: nextDayTasks };
     await saveTasks(next);
+    await deleteTaskSupabase(taskId);
+  };
+
+  const toggleCompleted = async (taskId: string, dayKey: string) => {
+    const dayTasks = tasksByDay[dayKey] || [];
+    const nextDayTasks = dayTasks.map((t) => (t.id === taskId ? { ...t, completed: !t.completed } : t));
+    const next: TasksByDay = { ...tasksByDay, [dayKey]: nextDayTasks };
+    await saveTasks(next);
+    const task = nextDayTasks.find((t) => t.id === taskId);
+    if (task) await updateTaskCompletedSupabase(taskId, task.completed ?? false);
   };
 
   return (
@@ -169,8 +257,11 @@ export default function CalendarioScreen() {
           contentContainerStyle={{ paddingBottom: 20 }}
           renderItem={({ item }) => (
             <View style={styles.taskItem}>
+              <Pressable style={styles.checkbox} onPress={() => toggleCompleted(item.id, selectedDate)}>
+                <Text style={styles.checkboxText}>{item.completed ? '✓' : ''}</Text>
+              </Pressable>
               <View style={{ flex: 1 }}>
-                <Text style={styles.taskTitle}>{item.title}</Text>
+                <Text style={[styles.taskTitle, item.completed && styles.taskTitleCompleted]}>{item.title}</Text>
                 {item.description ? <Text style={styles.taskDesc}>{item.description}</Text> : null}
                 <Text style={styles.taskDue}>Vence: {new Date(item.dueAt).toLocaleString()}</Text>
               </View>
@@ -252,7 +343,10 @@ const styles = StyleSheet.create({
   addButtonText: { color: '#fff', fontWeight: '700' },
   emptyText: { paddingHorizontal: 16, color: '#6B6B6B', marginTop: 8 },
   taskItem: { marginHorizontal: 16, marginTop: 10, backgroundColor: '#FEF9F3', borderRadius: 12, padding: 12, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#F0E8DC' },
+  checkbox: { width: 28, height: 28, borderRadius: 14, borderWidth: 2, borderColor: '#F77F00', alignItems: 'center', justifyContent: 'center', marginRight: 10 },
+  checkboxText: { fontSize: 16, fontWeight: '700', color: '#F77F00' },
   taskTitle: { fontSize: 16, fontWeight: '700', color: '#161616' },
+  taskTitleCompleted: { textDecorationLine: 'line-through', color: '#6B6B6B' },
   taskDesc: { fontSize: 13, color: '#3D3D3D', marginTop: 4 },
   taskDue: { fontSize: 12, color: '#6B6B6B', marginTop: 6 },
   deleteBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#FECB62', alignItems: 'center', justifyContent: 'center', marginLeft: 10 },
